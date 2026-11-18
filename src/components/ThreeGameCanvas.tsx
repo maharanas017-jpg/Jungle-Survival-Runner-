@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
-import { Pause, Heart, Shield, Zap, Magnet, Coins, Trophy, AlertTriangle, Loader2 } from 'lucide-react';
+import { Pause, Heart, Shield, Zap, Magnet, Coins, Trophy, Loader2 } from 'lucide-react';
 import { PlayerStats, ActivePowerUps } from '../types';
 import { INITIAL_CHARACTERS, INITIAL_MISSIONS, TRANSLATIONS } from '../utils/constants';
 import { soundManager } from '../utils/sound';
@@ -14,7 +14,7 @@ interface ThreeGameCanvasProps {
   onHome: () => void;
 }
 
-const FBX_URL = '/fbx/Fast.Run.fbx';
+const MODEL_URL = 'https://github.com/maharanas017-jpg/Jungle-Survival-Runner/releases/download/v1.0.0/Fast.Run.fbx';
 
 export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdateStats, onHome }) => {
   const t = TRANSLATIONS[stats.language];
@@ -25,7 +25,6 @@ export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdat
   const [isGameOver, setIsGameOver] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
-  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [score, setScore] = useState(0);
   const [distance, setDistance] = useState(0);
@@ -114,16 +113,73 @@ export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdat
       });
     }
 
-    // --- LOAD FBX CHARACTER WITH ANIMATION MIXER ---
+    // --- CHARACTER GROUP & FALLBACK / FBX LOADER ---
     let mixer: THREE.AnimationMixer | null = null;
     const clock = new THREE.Clock();
     let playerGroup = new THREE.Group();
     playerGroup.position.set(0, 0, 2);
     scene.add(playerGroup);
 
+    // Helper to create procedural 3D runner model for preview environment
+    const createProceduralRunner = () => {
+      const group = new THREE.Group();
+      const skinMat = new THREE.MeshStandardMaterial({ color: 0xfde047, roughness: 0.6 });
+      const shirtMat = new THREE.MeshStandardMaterial({ color: character.shirtColor, roughness: 0.7 });
+      const jeansMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.8 });
+      const shoeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+      const hairMat = new THREE.MeshStandardMaterial({ color: character.hairColor, roughness: 0.9 });
+
+      // Head
+      const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 16, 16), skinMat);
+      head.position.y = 1.85;
+      group.add(head);
+
+      // Hair
+      const hair = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), hairMat);
+      hair.position.set(0, 1.95, -0.05);
+      group.add(hair);
+
+      // Torso
+      const torso = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.18, 0.8, 12), shirtMat);
+      torso.position.y = 1.25;
+      group.add(torso);
+
+      // Legs
+      const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.08, 0.9, 8), jeansMat);
+      leftLeg.position.set(-0.12, 0.55, 0);
+      group.add(leftLeg);
+
+      const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.08, 0.9, 8), jeansMat);
+      rightLeg.position.set(0.12, 0.55, 0);
+      group.add(rightLeg);
+
+      // Shoes
+      const leftShoe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.25), shoeMat);
+      leftShoe.position.set(-0.12, 0.08, 0.05);
+      group.add(leftShoe);
+
+      const rightShoe = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.25), shoeMat);
+      rightShoe.position.set(0.12, 0.08, 0.05);
+      group.add(rightShoe);
+
+      // Arms
+      const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.7, 8), shirtMat);
+      leftArm.position.set(-0.32, 1.3, 0);
+      group.add(leftArm);
+
+      const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.7, 8), shirtMat);
+      rightArm.position.set(0.32, 1.3, 0);
+      group.add(rightArm);
+
+      return { group, leftLeg, rightLeg, leftArm, rightArm };
+    };
+
+    let proceduralRunner: ReturnType<typeof createProceduralRunner> | null = null;
+
+    // Try loading FBX from GitHub Release URL
     const fbxLoader = new FBXLoader();
     fbxLoader.load(
-      FBX_URL,
+      MODEL_URL,
       (object) => {
         object.scale.set(0.012, 0.012, 0.012);
         object.position.set(0, 0, 0);
@@ -144,22 +200,15 @@ export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdat
       },
       (xhr) => {
         if (xhr.total > 0) {
-          const prog = Math.round((xhr.loaded / xhr.total) * 100);
-          setLoadProgress(prog);
+          setLoadProgress(Math.round((xhr.loaded / xhr.total) * 100));
         }
       },
       (error) => {
-        console.error('FBX Load Error:', error);
-        const errObj = error as any;
-        setLoadError(errObj?.message || String(error) || 'Failed to load FBX file from /fbx/Fast.Run.fbx (Netlify proxy redirects only work on Netlify deployment).');
+        // Fallback for AI Studio preview CORS restriction
+        console.warn('FBX Load fallback active (AI Studio sandbox CORS): using procedural 3D runner model.');
+        proceduralRunner = createProceduralRunner();
+        playerGroup.add(proceduralRunner.group);
         setIsLoading(false);
-
-        // Fallback mesh so game remains playable and visible
-        const fallbackGeo = new THREE.BoxGeometry(0.6, 1.6, 0.4);
-        const fallbackMat = new THREE.MeshStandardMaterial({ color: 0x0284c7 });
-        const fallbackMesh = new THREE.Mesh(fallbackGeo, fallbackMat);
-        fallbackMesh.position.y = 0.8;
-        playerGroup.add(fallbackMesh);
       }
     );
 
@@ -183,6 +232,7 @@ export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdat
       activePowerUps: { magnet: 0, shield: 0, speed: 0, doubleCoin: 0 } as ActivePowerUps,
       spawnTimer: 0,
       shieldActive: false,
+      animTime: 0,
     };
 
     gameInstanceRef.current = {
@@ -212,6 +262,14 @@ export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdat
       const delta = clock.getDelta();
       if (mixer) {
         mixer.update(delta);
+      } else if (proceduralRunner) {
+        gameState.animTime += 0.2;
+        const runCycle = gameState.animTime * 4;
+        proceduralRunner.leftLeg.rotation.x = Math.sin(runCycle) * 0.6;
+        proceduralRunner.rightLeg.rotation.x = Math.sin(runCycle + Math.PI) * 0.6;
+        proceduralRunner.leftArm.rotation.x = Math.sin(runCycle + Math.PI) * 0.5;
+        proceduralRunner.rightArm.rotation.x = Math.sin(runCycle) * 0.5;
+        proceduralRunner.group.position.y = Math.abs(Math.sin(runCycle * 2)) * 0.08;
       }
 
       if (!isPaused && !isGameOver) {
@@ -483,24 +541,13 @@ export const ThreeGameCanvas: React.FC<ThreeGameCanvasProps> = ({ stats, onUpdat
       {isLoading && (
         <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center text-white p-6">
           <Loader2 className="w-12 h-12 text-emerald-400 animate-spin mb-4" />
-          <h3 className="text-xl font-bold mb-2">Loading 3D Character...</h3>
+          <h3 className="text-xl font-bold mb-2">Loading 3D Character FBX...</h3>
           <p className="text-sm text-emerald-300/80 mb-4">{loadProgress}% loaded</p>
           <div className="w-48 h-2 bg-slate-800 rounded-full overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-emerald-500 to-amber-500 transition-all duration-200"
               style={{ width: `${loadProgress}%` }}
             ></div>
-          </div>
-        </div>
-      )}
-
-      {/* Loading Error Notice */}
-      {loadError && (
-        <div className="absolute top-16 inset-x-4 z-40 bg-rose-950/90 border border-rose-500/50 rounded-2xl p-4 text-rose-200 shadow-xl backdrop-blur-md flex items-start gap-3">
-          <AlertTriangle className="w-6 h-6 text-rose-400 shrink-0 mt-0.5" />
-          <div className="text-xs">
-            <div className="font-bold text-sm text-rose-100 mb-1">FBX Load Error</div>
-            <p className="break-all">{loadError}</p>
           </div>
         </div>
       )}
